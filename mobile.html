@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 增加 maximum-scale 和 user-scalable 防止手机端双击放大打乱布局 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>会议中心会议室使用情况概览</title>
+    <style>
+        :root {
+            --header-bg: #2c3e50;
+            --cell-border: #e0e0e0;
+            --time-col-width: 80px;
+            --room-col-width: 160px;
+            --row-height: 35px; 
+            --red-internal: #e74c3c;
+            --green-external: #27ae60;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f6fa;
+            color: #333;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* 顶部控制区 */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .controls-left, .controls-center, .controls-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h1 { font-size: 20px; margin: 0; color: #2c3e50; white-space: nowrap;}
+
+        button, input[type="date"] {
+            padding: 8px 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            touch-action: manipulation; /* 优化移动端点击响应 */
+        }
+
+        button:hover { background: #f0f0f0; border-color: #999; }
+        button.primary { background: #3498db; color: white; border-color: #3498db; }
+        button.danger { background: #e74c3c; color: white; border-color: #e74c3c; }
+
+        input[type="date"], input[type="time"], input[type="text"], input[type="password"], select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        #authStatus {
+            font-size: 13px; font-weight: bold; color: #e74c3c;
+            padding: 4px 8px; background: #fdf0f0; border-radius: 4px;
+            white-space: nowrap;
+        }
+        #authStatus.unlocked { color: #27ae60; background: #eafaf1; }
+
+        /* 表格容器 */
+        .schedule-wrapper {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            overflow: auto;
+            max-height: calc(100vh - 150px);
+            position: relative;
+            -webkit-overflow-scrolling: touch; /* iOS丝滑滚动 */
+        }
+
+        .schedule-container { display: flex; min-width: max-content; }
+
+        /* 左侧时间轴 */
+        .time-column {
+            width: var(--time-col-width); flex-shrink: 0;
+            position: sticky; left: 0; z-index: 10;
+            background: white; border-right: 2px solid var(--header-bg);
+        }
+
+        .time-header {
+            height: 50px; background: var(--header-bg); color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; position: sticky; top: 0; z-index: 11;
+        }
+
+        .time-slot {
+            height: var(--row-height); display: flex; align-items: center;
+            justify-content: center; font-size: 12px; color: #666;
+            border-bottom: 1px solid var(--cell-border); box-sizing: border-box;
+        }
+
+        /* 会议室列表 */
+        .rooms-container { display: flex; flex-direction: column; }
+        .rooms-header {
+            display: flex; height: 50px; background: var(--header-bg); color: white;
+            position: sticky; top: 0; z-index: 9;
+        }
+
+        .room-header {
+            width: var(--room-col-width); flex-shrink: 0; display: flex;
+            align-items: center; justify-content: center; font-size: 13px;
+            text-align: center; padding: 0 5px; border-right: 1px solid rgba(255,255,255,0.2);
+            box-sizing: border-box; word-break: break-all; line-height: 1.2;
+        }
+
+        .rooms-body { display: flex; position: relative; }
+        .room-column {
+            width: var(--room-col-width); flex-shrink: 0;
+            border-right: 1px solid var(--cell-border); position: relative;
+        }
+
+        /* 背景网格 */
+        .grid-row {
+            height: var(--row-height); border-bottom: 1px solid var(--cell-border);
+            box-sizing: border-box; cursor: pointer; transition: background 0.2s;
+        }
+        .grid-row:hover { background-color: #f0f8ff !important; }
+        .grid-row:nth-child(even) { background-color: #fafafa; }
+
+        /* 会议块 */
+        .meeting-block {
+            position: absolute; left: 2px; right: 2px; border-radius: 4px;
+            color: white; font-size: 12px; display: flex; align-items: center;
+            justify-content: center; text-align: center; padding: 2px;
+            box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+            overflow: hidden; z-index: 5; word-break: break-all; cursor: pointer;
+        }
+        .meeting-block:active { opacity: 0.8; }
+        .status-internal { background-color: var(--red-internal); }
+        .status-external { background-color: var(--green-external); }
+
+        /* 图例 */
+        .legend {
+            margin-top: 15px; display: flex; gap: 15px; font-size: 13px;
+            justify-content: flex-start; padding-left: 10px; flex-wrap: wrap;
+        }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-color { width: 16px; height: 16px; border-radius: 3px; }
+
+        /* 弹窗 */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: center;
+            padding: 15px; box-sizing: border-box;
+        }
+        .modal-overlay.active { display: flex; }
+
+        .modal {
+            background: white; padding: 20px; border-radius: 8px;
+            width: 400px; max-width: 100%; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            max-height: 95vh; overflow-y: auto;
+        }
+        .modal h3 { margin-top: 0; color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 18px;}
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
+        .form-group input, .form-group select { width: 100%; }
+        
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .error-msg { color: #e74c3c; font-size: 12px; margin-top: 5px; display: none; }
+
+        /* =========================================================
+           响应式适配：手机与平板竖屏/横屏
+           ========================================================= */
+        
+        /* 1. 平板及大屏手机 (宽度小于 768px) */
+        @media (max-width: 768px) {
+            :root {
+                --time-col-width: 55px;
+                --room-col-width: 130px;
+                --row-height: 30px;
+            }
+            body { padding: 10px; }
+            h1 { font-size: 16px; }
+            .controls {
+                padding: 10px; flex-direction: column; align-items: stretch; gap: 8px;
+            }
+            .controls-left, .controls-right { justify-content: center; }
+            .controls-center {
+                justify-content: space-between; width: 100%;
+            }
+            .controls-center button { flex: 1; padding: 8px 0; font-size: 13px; }
+            .controls-center input[type="date"] { flex: 2; text-align: center; font-size: 13px;}
+            
+            .room-header { font-size: 11px; padding: 0 2px; }
+            .time-slot { font-size: 10px; }
+            .meeting-block { font-size: 11px; }
+            
+            /* 弹窗适配 */
+            .form-group input, .form-group select { font-size: 16px; } /* 防止iOS输入时自动放大 */
+            .modal-actions button { flex: 1; padding: 12px; font-size: 15px; } /* 按钮加大方便手指点击 */
+            .modal-actions { flex-wrap: wrap; }
+            .modal-actions .danger { width: 100%; margin-bottom: 10px; }
+        }
+
+        /* 2. 手机横屏 (高度小于 500px，宽度大于 600px) */
+        @media (orientation: landscape) and (max-height: 500px) {
+            :root {
+                --row-height: 28px;
+                --time-col-width: 50px;
+                --room-col-width: 120px;
+            }
+            body { padding: 8px; }
+            h1 { display: none; } /* 横屏时隐藏标题，节省宝贵高度 */
+            .controls {
+                flex-direction: row; flex-wrap: nowrap; padding: 8px 15px; margin-bottom: 8px;
+            }
+            .controls-center { width: auto; }
+            .controls-center button { padding: 6px 10px; }
+            .legend { display: none; } /* 横屏时隐藏图例节省空间 */
+            
+            .schedule-wrapper {
+                max-height: calc(100vh - 80px); /* 重新计算高度，尽量一屏放下 */
+            }
+            
+            /* 横屏时把弹窗做成左右两列布局，节省垂直空间 */
+            .modal { width: 600px; max-width: 95%; display: flex; flex-wrap: wrap; gap: 10px;}
+            .modal h3 { width: 100%; margin-bottom: 5px; padding-bottom: 5px;}
+            .form-group { flex: 1 1 45%; margin-bottom: 10px; } 
+            .modal-actions { width: 100%; margin-top: 10px;}
+        }
+        
+        /* 增加竖屏提示 */
+        @media (orientation: portrait) and (max-width: 500px) {
+            .portrait-tip {
+                display: block;
+                text-align: center;
+                font-size: 12px;
+                color: #e67e22;
+                margin-bottom: 5px;
+                background: #fdf2e9;
+                padding: 6px;
+                border-radius: 4px;
+            }
+        }
+        .portrait-tip { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部控制区 -->
+    <div class="controls">
+        <div class="controls-left">
+            <h1>📅 会议室排期表</h1>
+            <span id="authStatus">🔒 未授权</span>
+        </div>
+        <div class="controls-center">
+            <button onclick="changeDate(-1)">◀ 前一天</button>
+            <input type="date" id="datePicker" onchange="onDateChange()">
+            <button onclick="goToday()">今天</button>
+            <button onclick="changeDate(1)">后一天 ▶</button>
+        </div>
+        <div class="controls-right">
+            <span id="displayDateText" style="font-weight: bold; color: #e74c3c; font-size: 14px;"></span>
+        </div>
+    </div>
+
+    <!-- 竖屏提示（仅在手机竖屏时显示） -->
+    <div class="portrait-tip">📱 提示：横屏查看表格体验更佳，可左右滑动查看所有会议室</div>
+
+    <!-- 排期表主体 -->
+    <div class="schedule-wrapper">
+        <div class="schedule-container">
+            <div class="time-column">
+                <div class="time-header">时间</div>
+                <div id="timeSlots"></div>
+            </div>
+            <div class="rooms-container">
+                <div class="rooms-header" id="roomsHeader"></div>
+                <div class="rooms-body" id="roomsBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图例 -->
+    <div class="legend">
+        <div class="legend-item"><div class="legend-color status-external"></div><span>外部使用</span></div>
+        <div class="legend-item"><div class="legend-color status-internal"></div><span>内部使用</span></div>
+        <div style="color: #666; margin-left: auto; font-size: 12px;">💡 点击网格添加，点击色块修改（需密码）</div>
+    </div>
+
+    <!-- 密码验证弹窗 -->
+    <div class="modal-overlay" id="authModal">
+        <div class="modal">
+            <h3>🔐 管理员验证</h3>
+            <p style="font-size: 14px; color: #666; margin-top: 0;">修改、增加或删除会议需要验证密码。</p>
+            <div class="form-group">
+                <input type="password" id="passwordInput" placeholder="请输入密码" onkeypress="if(event.key==='Enter') verifyPassword()">
+                <div class="error-msg" id="authError">密码错误，请重试！</div>
+            </div>
+            <div class="modal-actions">
+                <button onclick="closeAuthModal()">取消</button>
+                <button class="primary" onclick="verifyPassword()">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/修改会议弹窗 -->
+    <div class="modal-overlay" id="meetingModal">
+        <div class="modal">
+            <h3 id="modalTitle">添加会议</h3>
+            <input type="hidden" id="editIndex" value="-1">
+            <input type="hidden" id="editRoom" value="">
+            <input type="hidden" id="editDate" value="">
+            
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label>会议室</label>
+                <input type="text" id="formRoom" disabled style="background: #eee;">
+            </div>
+            <div class="form-group">
+                <label>开始时间</label>
+                <input type="time" id="formStart" step="1800">
+            </div>
+            <div class="form-group">
+                <label>结束时间</label>
+                <input type="time" id="formEnd" step="1800">
+            </div>
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label>使用部门</label>
+                <input type="text" id="formDept" placeholder="例如：政府办">
+            </div>
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label>使用状态</label>
+                <select id="formStatus">
+                    <option value="internal">内部使用（红色）</option>
+                    <option value="external">外部使用（绿色）</option>
+                </select>
+            </div>
+            <div class="error-msg" id="formError" style="flex: 1 1 100%;">时间冲突或信息不完整！</div>
+            
+            <div class="modal-actions">
+                <button class="danger" id="btnDelete" onclick="deleteMeeting()" style="display: none;">删除会议</button>
+                <button onclick="closeMeetingModal()">取消</button>
+                <button class="primary" onclick="saveMeeting()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ================= 配置区 =================
+        const ADMIN_PASSWORD = "13666222130"; // 修改密码请更改此处
+
+        const rooms = [
+            "玉华厅(22)",
+            "第一会议室(98)",
+            "第三会议室(100)",
+            "第二会议室(49)",
+            "第五会议室(67)",
+            "第六会议室(360)",
+            "第四会议室(75)",
+            "第十二会议室(12)",
+            "金华厅(30)"
+        ];
+
+        const startHour = 7;  
+        const endHour = 18.5; 
+        const interval = 0.5; 
+
+        const defaultData = [
+            { date: "2026-09-15", room: "第二会议室(49)", start: "09:00", end: "12:00", dept: "政府办", status: "internal" },
+            { date: "2026-09-15", room: "金华厅(30)", start: "14:00", end: "16:30", dept: "统战部", status: "internal" }
+        ];
+
+        let isAuthorized = false; 
+        let pendingAction = null; 
+        let currentDate = new Date();
+
+        function loadData() {
+            const stored = localStorage.getItem('meetingData');
+            if (stored) {
+                try { return JSON.parse(stored); } catch (e) { return defaultData; }
+            }
+            return defaultData;
+        }
+
+        function saveData(data) { localStorage.setItem('meetingData', JSON.stringify(data)); }
+        let meetingData = loadData();
+
+        function timeToDecimal(timeStr) {
+            const [h, m] = timeStr.split(':').map(Number);
+            return h + m / 60;
+        }
+
+        function formatDate(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function initTimeSlots() {
+            const container = document.getElementById('timeSlots');
+            container.innerHTML = '';
+            let current = startHour;
+            while (current <= endHour) {
+                const h = Math.floor(current);
+                const m = (current % 1) * 60;
+                const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                const div = document.createElement('div');
+                div.className = 'time-slot';
+                div.textContent = timeStr;
+                container.appendChild(div);
+                current += interval;
+            }
+        }
+
+        function initRoomsHeader() {
+            const header = document.getElementById('roomsHeader');
+            header.innerHTML = '';
+            rooms.forEach(room => {
+                const div = document.createElement('div');
+                div.className = 'room-header';
+                div.textContent = room;
+                header.appendChild(div);
+            });
+        }
+
+        function initGridBody() {
+            const body = document.getElementById('roomsBody');
+            body.innerHTML = '';
+            const totalRows = Math.ceil((endHour - startHour) / interval);
+
+            rooms.forEach(room => {
+                const col = document.createElement('div');
+                col.className = 'room-column';
+                col.dataset.room = room;
+                
+                for (let i = 0; i < totalRows; i++) {
+                    const row = document.createElement('div');
+                    row.className = 'grid-row';
+                    row.dataset.room = room;
+                    row.dataset.timeIndex = i; 
+                    
+                    row.onclick = function(e) {
+                        if (e.target !== row) return; 
+                        const startTime = getTimeFromIndex(i);
+                        const endTime = getTimeFromIndex(i + 1);
+                        requestAuth(() => openAddModal(room, startTime, endTime, formatDate(currentDate)));
+                    };
+                    col.appendChild(row);
+                }
+                body.appendChild(col);
+            });
+        }
+
+        function getTimeFromIndex(index) {
+            const total = startHour + index * interval;
+            const h = Math.floor(total);
+            const m = Math.round((total % 1) * 60);
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+
+        function renderSchedule(dateStr) {
+            document.querySelectorAll('.meeting-block').forEach(el => el.remove());
+            const dayData = meetingData.filter(item => item.date === dateStr);
+
+            dayData.forEach((meeting, index) => {
+                const roomCol = document.querySelector(`.room-column[data-room="${meeting.room}"]`);
+                if (!roomCol) return;
+
+                const startDec = timeToDecimal(meeting.start);
+                const endDec = timeToDecimal(meeting.end);
+                const rowHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-height').replace('px', ''));
+                
+                const topOffset = (startDec - startHour) * (rowHeight / interval);
+                const height = (endDec - startDec) * (rowHeight / interval);
+
+                const block = document.createElement('div');
+                block.className = `meeting-block ${meeting.status === 'internal' ? 'status-internal' : 'status-external'}`;
+                block.style.top = `${topOffset}px`;
+                block.style.height = `${height}px`;
+                block.textContent = meeting.dept;
+                block.title = `${meeting.dept}\n${meeting.start} - ${meeting.end}\n状态: ${meeting.status === 'internal' ? '内部使用' : '外部使用'}`;
+
+                block.onclick = function(e) {
+                    e.stopPropagation(); 
+                    requestAuth(() => openEditModal(meeting, index, meeting.room, dateStr));
+                };
+                roomCol.appendChild(block);
+            });
+
+            const dateObj = new Date(dateStr);
+            const weekDays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+            document.getElementById('displayDateText').textContent = 
+                `${dateObj.getMonth() + 1}月${dateObj.getDate()}日 ${weekDays[dateObj.getDay()]}`;
+        }
+
+        function initDatePicker() { document.getElementById('datePicker').value = formatDate(currentDate); }
+
+        function onDateChange() {
+            const selectedDate = document.getElementById('datePicker').value;
+            currentDate = new Date(selectedDate);
+            renderSchedule(selectedDate);
+        }
+
+        function changeDate(days) {
+            currentDate.setDate(currentDate.getDate() + days);
+            document.getElementById('datePicker').value = formatDate(currentDate);
+            renderSchedule(formatDate(currentDate));
+        }
+
+        function goToday() {
+            currentDate = new Date();
+            document.getElementById('datePicker').value = formatDate(currentDate);
+            renderSchedule(formatDate(currentDate));
+        }
+
+        function requestAuth(callback) {
+            if (isAuthorized) { callback(); return; }
+            pendingAction = callback;
+            document.getElementById('authModal').classList.add('active');
+            document.getElementById('passwordInput').value = '';
+            document.getElementById('authError').style.display = 'none';
+            // 移动端自动聚焦键盘可能会挡住弹窗，可以延迟聚焦或取消自动聚焦
+            setTimeout(() => document.getElementById('passwordInput').focus(), 300);
+        }
+
+        function verifyPassword() {
+            const input = document.getElementById('passwordInput').value;
+            if (input === ADMIN_PASSWORD) {
+                isAuthorized = true;
+                document.getElementById('authStatus').textContent = "🔓 已授权";
+                document.getElementById('authStatus').classList.add('unlocked');
+                closeAuthModal();
+                if (pendingAction) { pendingAction(); pendingAction = null; }
+            } else {
+                document.getElementById('authError').style.display = 'block';
+            }
+        }
+
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.remove('active');
+            pendingAction = null;
+        }
+
+        function openAddModal(room, start, end, date) {
+            document.getElementById('modalTitle').textContent = "添加会议";
+            document.getElementById('editIndex').value = "-1";
+            document.getElementById('editRoom').value = room;
+            document.getElementById('editDate').value = date;
+            document.getElementById('formRoom').value = room;
+            document.getElementById('formStart').value = start;
+            document.getElementById('formEnd').value = end;
+            document.getElementById('formDept').value = "";
+            document.getElementById('formStatus').value = "internal";
+            document.getElementById('btnDelete').style.display = "none";
+            document.getElementById('formError').style.display = "none";
+            document.getElementById('meetingModal').classList.add('active');
+        }
+
+        function openEditModal(meeting, index, room, date) {
+            document.getElementById('modalTitle').textContent = "修改会议";
+            document.getElementById('editIndex').value = index;
+            document.getElementById('editRoom').value = room;
+            document.getElementById('editDate').value = date;
+            document.getElementById('formRoom').value = room;
+            document.getElementById('formStart').value = meeting.start;
+            document.getElementById('formEnd').value = meeting.end;
+            document.getElementById('formDept').value = meeting.dept;
+            document.getElementById('formStatus').value = meeting.status;
+            document.getElementById('btnDelete').style.display = "block";
+            document.getElementById('formError').style.display = "none";
+            document.getElementById('meetingModal').classList.add('active');
+        }
+
+        function closeMeetingModal() { document.getElementById('meetingModal').classList.remove('active'); }
+
+        function checkConflict(newMeeting, ignoreIndex = -1) {
+            for (let i = 0; i < meetingData.length; i++) {
+                if (i === ignoreIndex) continue;
+                const m = meetingData[i];
+                if (m.date === newMeeting.date && m.room === newMeeting.room) {
+                    const start1 = timeToDecimal(m.start);
+                    const end1 = timeToDecimal(m.end);
+                    const start2 = timeToDecimal(newMeeting.start);
+                    const end2 = timeToDecimal(newMeeting.end);
+                    if (Math.max(start1, start2) < Math.min(end1, end2)) return true;
+                }
+            }
+            return false;
+        }
+
+        function saveMeeting() {
+            const index = parseInt(document.getElementById('editIndex').value);
+            const room = document.getElementById('editRoom').value;
+            const date = document.getElementById('editDate').value;
+            const start = document.getElementById('formStart').value;
+            const end = document.getElementById('formEnd').value;
+            const dept = document.getElementById('formDept').value.trim();
+            const status = document.getElementById('formStatus').value;
+
+            if (!start || !end || !dept) { showFormError("请填写完整信息！"); return; }
+            if (timeToDecimal(start) >= timeToDecimal(end)) { showFormError("结束时间必须大于开始时间！"); return; }
+
+            const newMeeting = { date, room, start, end, dept, status };
+            if (checkConflict(newMeeting, index)) { showFormError("该时间段与已有会议冲突！"); return; }
+
+            if (index === -1) meetingData.push(newMeeting);
+            else meetingData[index] = newMeeting;
+
+            saveData(meetingData);
+            renderSchedule(formatDate(currentDate));
+            closeMeetingModal();
+        }
+
+        function deleteMeeting() {
+            const index = parseInt(document.getElementById('editIndex').value);
+            if (index > -1 && confirm("确定要删除这个会议吗？")) {
+                meetingData.splice(index, 1);
+                saveData(meetingData);
+                renderSchedule(formatDate(currentDate));
+                closeMeetingModal();
+            }
+        }
+
+        function showFormError(msg) {
+            const el = document.getElementById('formError');
+            el.textContent = msg;
+            el.style.display = "block";
+        }
+
+        window.onload = function() {
+            initTimeSlots();
+            initRoomsHeader();
+            initGridBody();
+            initDatePicker();
+            renderSchedule(formatDate(currentDate));
+        };
+        
+        // 监听屏幕旋转，重新渲染或调整（针对某些手机浏览器旋转后高度计算错误的问题）
+        window.addEventListener("orientationchange", function() {
+            setTimeout(() => { renderSchedule(formatDate(currentDate)); }, 300);
+        });
+    </script>
+</body>
+</html>
